@@ -21,10 +21,6 @@ inline bool check_neighbour_state(__global uint* domain_state, uint2 size, int2 
         (domain_state[west] == next_state);
 }
 
-__kernel void parity_cellular_automata(__global uint *domain_state_r, __global uint *domain_state_w, uint2 size, uint n) {
-    
-}
-
 __kernel void cyclic_cellular_automata(__global uint *domain_state_r, __global uint *domain_state_w, uint2 size, uint n) {
     uint2 i2d = (uint2)(get_global_id(0), get_global_id(1));
     if (check_neighbour_state(domain_state_r, size, (int2)(i2d.x, i2d.y), n)) {
