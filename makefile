@@ -12,4 +12,4 @@ ca.o: ca.cpp
 
 clean:
 	@rm -f *.o
-	@rm -f ca
+	@rm -f cellular_automata

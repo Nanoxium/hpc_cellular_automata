@@ -11,8 +11,11 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <chrono>
 
 #include "Display.h"
+
+using namespace std::chrono;
 
 void showPlatforms(){
     std::vector<cl::Platform> platforms;
@@ -41,11 +44,12 @@ cl::Context getContext(cl_device_type requestedDeviceType, std::vector<cl::Platf
 int main(int argc, char** argv) {
 
     if (argc < 2)
-        std::cout << "usage : cellular_automata <n>" << std::endl;
+        std::cout << "usage : cellular_automata <n> [nb_iter]" << std::endl;
 
-    cl_uint2 domain;
-    domain.x = 1000;
-    domain.y = 1000;
+    cl_uint2 domain_size;
+    domain_size.x = 1000;
+    domain_size.y = 1000;
+    int show_iter = (argc >= 3) ? atoi(argv[2]) : 0;
 
     showPlatforms();
 
@@ -75,41 +79,55 @@ int main(int argc, char** argv) {
         cl::Kernel kernel(program, "cyclic_cellular_automata");
 
         // host side memory allocation
-        cl_uint* domain_state = new cl_uint[domain.x * domain.y];
+        cl_uint* domain_state = new cl_uint[domain_size.x * domain_size.y];
 
         // device side memory allocation for the domain
-        cl::Buffer d_domain_state = cl::Buffer(context, CL_MEM_READ_WRITE, domain.x * domain.y * sizeof(cl_uint));
+        cl::Buffer d_domain_state_read = cl::Buffer(context, CL_MEM_READ_ONLY, domain_size.x * domain_size.y * sizeof(cl_uint));
+        cl::Buffer d_domain_state_write = cl::Buffer(context, CL_MEM_WRITE_ONLY, domain_size.x * domain_size.y * sizeof(cl_uint));
 
         //preparing parameters of the kernel
         cl_uint n = atoi(argv[1]);
 
         // Initializing a random domain
-        for(int i = 0; i < domain.x * domain.y; i++)
-            domain_state[i] = rand() % n;
+        std::srand(std::time(NULL)); // use current time as random seed generator
+        for(int i = 0; i < domain_size.x * domain_size.y; i++)
+            domain_state[i] = std::rand() % n;
 
         cl::NDRange local = cl::NDRange(1,1);
-        cl::NDRange global = cl::NDRange(std::ceil(float(domain.x)/float(local[0]))*local[0], std::ceil(float(domain.y)/float(local[1]))*local[1]);
+        cl::NDRange global = cl::NDRange(std::ceil(float(domain_size.x)/float(local[0]))*local[0], std::ceil(float(domain_size.y)/float(local[1]))*local[1]);
         std::cout << "Kernel execution" << std::endl;
 
-        kernel.setArg(0, d_domain_state);
-        kernel.setArg(1, domain);
-        kernel.setArg(2, n);
+        kernel.setArg(0, d_domain_state_read);
+        kernel.setArg(1, d_domain_state_write);
+        kernel.setArg(2, domain_size);
+        kernel.setArg(3, n);
 
-        Display<unsigned int> d(domain_state, domain.x, domain.y, n);
-        queue.enqueueWriteBuffer(d_domain_state, CL_TRUE, 0, domain.x * domain.y * sizeof(cl_uint), domain_state);
+        cl::Buffer current_buffer;
+
+        
+        Display<unsigned int> d(domain_state, domain_size.x, domain_size.y, n);
+        queue.enqueueWriteBuffer(d_domain_state_read, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
         for(int i = 0; i < 100000; i++){
-            // std::cout << "Iteration: " << i << std::endl;
+            auto start = high_resolution_clock::now();
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
-
-            // Reading device buffer for the domain. This call is a synchronous call due to CL_TRUE
-            if (i > 50000)
-                queue.enqueueReadBuffer(d_domain_state, CL_TRUE, 0, domain.x * domain.y * sizeof(cl_uint), domain_state);
             queue.finish();
-
+            
+            // Copying new values in read buffers
+            queue.enqueueCopyBuffer(d_domain_state_write, d_domain_state_read, 0, 0, domain_size.x * domain_size.y * sizeof(cl_uint));
+            queue.finish();
+            
             // Displaying current state with opencv
-            if(i > 50000)
+            if(i >= show_iter){
+                // Reading device buffer for the domain. This call is a synchronous call due to CL_TRUE
+                queue.enqueueReadBuffer(d_domain_state_write, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
+                queue.finish();
                 d.show();
+            }
+            auto stop = high_resolution_clock::now();
+            auto duration = duration_cast<microseconds>(stop-start);
+            std::cout << "Iteration: " << i << ", time taken : " << duration.count() << " [μs]" << std::endl;
         }
+        d.show();
         d.waitForKey();
     } catch (cl::Error error) {
         std::cerr << error.what() << "(" << error.err() << ")" << std::endl;
