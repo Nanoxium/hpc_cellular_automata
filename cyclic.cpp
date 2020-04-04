@@ -44,7 +44,7 @@ cl::Context getContext(cl_device_type requestedDeviceType, std::vector<cl::Platf
 int main(int argc, char** argv) {
 
     if (argc < 2)
-        std::cout << "usage : cellular_automata <n> [nb_iter]" << std::endl;
+        std::cout << "usage : "<< argv[0] << " <n> [nb_iter]" << std::endl;
 
     cl_uint2 domain_size;
     domain_size.x = 1000;
@@ -67,7 +67,7 @@ int main(int argc, char** argv) {
 
     
     // Reading source code for the
-    std::ifstream sourceFile("ca.cl");
+    std::ifstream sourceFile("cyclic.cl");
     std::string sourceCode(std::istreambuf_iterator<char>(sourceFile), (std::istreambuf_iterator<char>()));
     cl::Program::Sources source(1, std::make_pair(sourceCode.c_str(), sourceCode.length()+1));
 
