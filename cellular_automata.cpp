@@ -135,11 +135,11 @@ int main(int argc, char** argv) {
         kernel.setArg(2, domain_size);
         kernel.setArg(3, n);
 
-        int show_iter = (argc >= 7) ? atoi(argv[6]) : 0;
+        int nb_iter = (argc >= 7) ? atoi(argv[6]) : 0;
         Display<unsigned int> d = Display<unsigned int>(domain_state, domain_size.x, domain_size.y, n);
         queue.enqueueWriteBuffer(d_domain_state_read, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
         // d.waitForKey();
-        for(int i = 0;; i++){
+        for(int i = 0;i < nb_iter; i++){
             auto start = high_resolution_clock::now();
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
             
