@@ -3,9 +3,9 @@ inline uint index1D(uint2 i2d, uint2 size) {
 }
 
 inline uint get_state(__global uint* domain_state, uint2 size, int2 pos) {
-    uint2 posN = (uint2)(pos.x, (pos.y - 1 < 0) ? size.y : pos.y - 1);
+    uint2 posN = (uint2)(pos.x, (pos.y - 1 < 0) ? size.y - 1 : pos.y - 1);
     uint2 posS = (uint2)(pos.x, (pos.y + 1 >= size.y) ? 0 : pos.y + 1);
-    uint2 posW = (uint2)((pos.x - 1 < 0 ) ? size.x : pos.x - 1, pos.y);
+    uint2 posW = (uint2)((pos.x - 1 < 0 ) ? size.x - 1 : pos.x - 1, pos.y);
     uint2 posE = (uint2)((pos.x + 1 >= size.x) ? 0 : pos.x + 1, pos.y);
     
     uint north = index1D(posN, size);

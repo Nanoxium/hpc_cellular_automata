@@ -42,30 +42,31 @@ cl::Context getContext(cl_device_type requestedDeviceType, std::vector<cl::Platf
 }
 
 void init_square(cl_uint *domain, cl_uint2 domain_size, int size) {
-    int top_left_x = domain_size.y/2 - size/2;
-    int top_left_y = domain_size.y/2 - size/2;
-    int x = top_left_x;
-    int y = top_left_y;
-    
-    for (; x < size; x++)
-        domain[y * domain_size.x + x] = 1;
-    
-    x = top_left_x;
-    for (y = top_left_y; y < size; y++)
-        domain[y * domain_size.x + x] = 1;
+    // Clearing all the domain
+    for(int i = 0; i < domain_size.x; i++)
+        for(int j = 0; j < domain_size.y; j++)
+            domain[j * domain_size.x + i] = 0;
 
-    x = top_left_x + size;
-    for (y = top_left_y; y < size; y++)
-        domain[y * domain_size.x + x] = 1;
+    int x = (domain_size.x - size)/2;
+    int y = (domain_size.y - size)/2;
     
-    for (x = top_left_x; x < size; x++)
-        domain[y * domain_size.x + x] = 1;
+    // Drawing horizontal lines
+    for(int i = 0; i <= size; i++){
+        domain[y * domain_size.x + x + i] = 1;
+        domain[(y + size) * domain_size.x + x + i] = 1;
+    }
+
+    // Drawing vertical lines
+    for(int i = 0; i <= size; i++){
+        domain[(y + i) * domain_size.x + x] = 1;
+        domain[(y + i) * domain_size.x + x + size] = 1;
+    }
 }
 
 int main(int argc, char** argv) {
 
-    if (argc < 4){
-        std::cout << "usage : "<< argv[0] << " <kernel_file> <n> <random_domain: 0 | 1> [x size] [y size] [nb_iter] [visual]" << std::endl;
+    if (argc < 4 || atoi(argv[2]) < 2){
+        std::cout << "usage : "<< argv[0] << " <kernel_file> <n> <domain_type: 0|1|2> [x size] [y size] [nb_iter] [visual] [seed]" << std::endl;
         exit(0);
     }
 
@@ -104,8 +105,8 @@ int main(int argc, char** argv) {
         cl_uint* domain_state = new cl_uint[domain_size.x * domain_size.y];
 
         // device side memory allocation for the domain
-        cl::Buffer d_domain_state_read = cl::Buffer(context, CL_MEM_READ_ONLY, domain_size.x * domain_size.y * sizeof(cl_uint));
-        cl::Buffer d_domain_state_write = cl::Buffer(context, CL_MEM_WRITE_ONLY, domain_size.x * domain_size.y * sizeof(cl_uint));
+        cl::Buffer d_domain_state_a = cl::Buffer(context, CL_MEM_READ_WRITE, domain_size.x * domain_size.y * sizeof(cl_uint));
+        cl::Buffer d_domain_state_b = cl::Buffer(context, CL_MEM_READ_WRITE, domain_size.x * domain_size.y * sizeof(cl_uint));
 
         //preparing parameters of the kernel
         cl_uint n = atoi(argv[2]);
@@ -116,7 +117,7 @@ int main(int argc, char** argv) {
                 init_square(domain_state, domain_size, 10);
                 break;
             case 1:
-                std::srand(std::time(NULL)); // use current time as random seed generator
+                std::srand((argc >= 9) ? atoi(argv[8]) : std::time(NULL)); // use current time as default random seed generator
                 for(int i = 0; i < domain_size.x * domain_size.y; i++)
                     domain_state[i] = std::rand() % n;
                 break;
@@ -130,34 +131,39 @@ int main(int argc, char** argv) {
         cl::NDRange global = cl::NDRange(std::ceil(float(domain_size.x)/float(local[0]))*local[0], std::ceil(float(domain_size.y)/float(local[1]))*local[1]);
         std::cout << "Kernel execution" << std::endl;
 
-        kernel.setArg(0, d_domain_state_read);
-        kernel.setArg(1, d_domain_state_write);
+        
         kernel.setArg(2, domain_size);
         kernel.setArg(3, n);
 
         int nb_iter = (argc >= 7) ? atoi(argv[6]) : 0;
         Display<unsigned int> d = Display<unsigned int>(domain_state, domain_size.x, domain_size.y, n);
-        queue.enqueueWriteBuffer(d_domain_state_read, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
-        // d.waitForKey();
-        for(int i = 0;i < nb_iter; i++){
-            auto start = high_resolution_clock::now();
+        queue.enqueueWriteBuffer(d_domain_state_a, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
+        auto start = high_resolution_clock::now();
+        for(int i = 0;i < nb_iter; i++){            
+            // Setting or swapping buffers during odd iteration
+            if (i % 2 == 0){
+                kernel.setArg(0, d_domain_state_a);
+                kernel.setArg(1, d_domain_state_b);
+            } else {
+                kernel.setArg(1, d_domain_state_a);
+                kernel.setArg(0, d_domain_state_b);
+            }
+
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
-            
-            // Copying new values in read buffers
-            queue.enqueueCopyBuffer(d_domain_state_write, d_domain_state_read, 0, 0, domain_size.x * domain_size.y * sizeof(cl_uint));
             queue.finish();
             
             // Displaying current state with opencv
-            auto stop = high_resolution_clock::now();
-            auto duration = duration_cast<microseconds>(stop-start);
-            std::cout << "Iteration: " << i << ", time taken : " << duration.count() << " [μs]" << std::endl;
             if(visual){
                 // Reading device buffer for the domain. This call is a synchronous call due to CL_TRUE
-                queue.enqueueReadBuffer(d_domain_state_write, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
+                queue.enqueueReadBuffer((nb_iter % 2 == 0) ? d_domain_state_a : d_domain_state_b, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
                 queue.finish();
                 d.show();
+                d.waitForKey();
             }
         }
+        auto stop = high_resolution_clock::now();
+        auto duration = duration_cast<milliseconds>(stop-start);
+        std::cout << "Total time: " << duration.count() / 1000.0 << " [s]" << std::endl;
         if(visual) {
             d.show();
             d.waitForKey();
