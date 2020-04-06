@@ -41,15 +41,38 @@ cl::Context getContext(cl_device_type requestedDeviceType, std::vector<cl::Platf
     throw CL_DEVICE_NOT_AVAILABLE;
 }
 
+void init_square(cl_uint *domain, cl_uint2 domain_size, int size) {
+    int top_left_x = domain_size.y/2 - size/2;
+    int top_left_y = domain_size.y/2 - size/2;
+    int x = top_left_x;
+    int y = top_left_y;
+    
+    for (; x < size; x++)
+        domain[y * domain_size.x + x] = 1;
+    
+    x = top_left_x;
+    for (y = top_left_y; y < size; y++)
+        domain[y * domain_size.x + x] = 1;
+
+    x = top_left_x + size;
+    for (y = top_left_y; y < size; y++)
+        domain[y * domain_size.x + x] = 1;
+    
+    for (x = top_left_x; x < size; x++)
+        domain[y * domain_size.x + x] = 1;
+}
+
 int main(int argc, char** argv) {
 
-    if (argc < 2)
-        std::cout << "usage : "<< argv[0] << " <n> [nb_iter]" << std::endl;
+    if (argc < 4){
+        std::cout << "usage : "<< argv[0] << " <kernel_file> <n> <random_domain: 0 | 1> [x size] [y size] [nb_iter] [visual]" << std::endl;
+        exit(0);
+    }
 
     cl_uint2 domain_size;
-    domain_size.x = 1000;
-    domain_size.y = 1000;
-    int show_iter = (argc >= 3) ? atoi(argv[2]) : 0;
+    domain_size.x = (argc >= 5) ? atoi(argv[4]) : 1000;
+    domain_size.y = (argc >= 6) ? atoi(argv[5]) : 1000;
+    bool visual = (argc >= 8) ? std::string(argv[7]).compare("visual")==0 : false;
 
     showPlatforms();
 
@@ -67,7 +90,7 @@ int main(int argc, char** argv) {
 
     
     // Reading source code for the
-    std::ifstream sourceFile("cyclic.cl");
+    std::ifstream sourceFile(argv[1]);
     std::string sourceCode(std::istreambuf_iterator<char>(sourceFile), (std::istreambuf_iterator<char>()));
     cl::Program::Sources source(1, std::make_pair(sourceCode.c_str(), sourceCode.length()+1));
 
@@ -75,8 +98,7 @@ int main(int argc, char** argv) {
     cl::Program program = cl::Program(context, source);
     try {
         program.build(devices);
-
-        cl::Kernel kernel(program, "cyclic_cellular_automata");
+        cl::Kernel kernel(program, "cellular_automaton");
 
         // host side memory allocation
         cl_uint* domain_state = new cl_uint[domain_size.x * domain_size.y];
@@ -86,12 +108,23 @@ int main(int argc, char** argv) {
         cl::Buffer d_domain_state_write = cl::Buffer(context, CL_MEM_WRITE_ONLY, domain_size.x * domain_size.y * sizeof(cl_uint));
 
         //preparing parameters of the kernel
-        cl_uint n = atoi(argv[1]);
+        cl_uint n = atoi(argv[2]);
 
         // Initializing a random domain
-        std::srand(std::time(NULL)); // use current time as random seed generator
-        for(int i = 0; i < domain_size.x * domain_size.y; i++)
-            domain_state[i] = std::rand() % n;
+        switch(atoi(argv[3])){
+            case 2:
+                init_square(domain_state, domain_size, 10);
+                break;
+            case 1:
+                std::srand(std::time(NULL)); // use current time as random seed generator
+                for(int i = 0; i < domain_size.x * domain_size.y; i++)
+                    domain_state[i] = std::rand() % n;
+                break;
+            default:
+                for(int i = 0; i < domain_size.x * domain_size.y; i++)
+                    domain_state[i] = 0;
+                break;
+        }
 
         cl::NDRange local = cl::NDRange(1,1);
         cl::NDRange global = cl::NDRange(std::ceil(float(domain_size.x)/float(local[0]))*local[0], std::ceil(float(domain_size.y)/float(local[1]))*local[1]);
@@ -102,33 +135,33 @@ int main(int argc, char** argv) {
         kernel.setArg(2, domain_size);
         kernel.setArg(3, n);
 
-        cl::Buffer current_buffer;
-
-        
-        Display<unsigned int> d(domain_state, domain_size.x, domain_size.y, n);
+        int show_iter = (argc >= 7) ? atoi(argv[6]) : 0;
+        Display<unsigned int> d = Display<unsigned int>(domain_state, domain_size.x, domain_size.y, n);
         queue.enqueueWriteBuffer(d_domain_state_read, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
-        for(int i = 0; i < 100000; i++){
+        // d.waitForKey();
+        for(int i = 0;; i++){
             auto start = high_resolution_clock::now();
             queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local);
-            queue.finish();
             
             // Copying new values in read buffers
             queue.enqueueCopyBuffer(d_domain_state_write, d_domain_state_read, 0, 0, domain_size.x * domain_size.y * sizeof(cl_uint));
             queue.finish();
             
             // Displaying current state with opencv
-            if(i >= show_iter){
+            auto stop = high_resolution_clock::now();
+            auto duration = duration_cast<microseconds>(stop-start);
+            std::cout << "Iteration: " << i << ", time taken : " << duration.count() << " [μs]" << std::endl;
+            if(visual){
                 // Reading device buffer for the domain. This call is a synchronous call due to CL_TRUE
                 queue.enqueueReadBuffer(d_domain_state_write, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
                 queue.finish();
                 d.show();
             }
-            auto stop = high_resolution_clock::now();
-            auto duration = duration_cast<microseconds>(stop-start);
-            std::cout << "Iteration: " << i << ", time taken : " << duration.count() << " [μs]" << std::endl;
         }
-        d.show();
-        d.waitForKey();
+        if(visual) {
+            d.show();
+            d.waitForKey();
+        }
     } catch (cl::Error error) {
         std::cerr << error.what() << "(" << error.err() << ")" << std::endl;
 		std::string buildLog;
