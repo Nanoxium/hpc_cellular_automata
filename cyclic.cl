@@ -25,8 +25,10 @@ inline bool check_neighbour_state(__global uint* domain_state, uint2 size, int2 
 
 __kernel void cellular_automaton(__global uint *domain_state_r, __global uint *domain_state_w, uint2 size, uint n) {
     uint2 i2d = (uint2)(get_global_id(0), get_global_id(1));
+    uint pos = index1D(i2d, size);
     if (check_neighbour_state(domain_state_r, size, (int2)(i2d.x, i2d.y), n)) {
-        uint pos = index1D(i2d, size);
         domain_state_w[pos] = (domain_state_r[pos] + 1) % n;
+    } else {
+        domain_state_w[pos] = domain_state_r[pos];
     }
 }

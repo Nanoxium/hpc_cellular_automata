@@ -158,7 +158,6 @@ int main(int argc, char** argv) {
                 queue.enqueueReadBuffer((nb_iter % 2 == 0) ? d_domain_state_a : d_domain_state_b, CL_TRUE, 0, domain_size.x * domain_size.y * sizeof(cl_uint), domain_state);
                 queue.finish();
                 d.show();
-                d.waitForKey();
             }
         }
         auto stop = high_resolution_clock::now();
